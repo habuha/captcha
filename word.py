@@ -13,8 +13,8 @@ app.secret_key = 'supersecretkey'  # 生产环境需要更安全的密钥
 IMG_WIDTH = 400
 IMG_HEIGHT = 200
 NOISE_POINTS = 500  # 增加噪点数量
-FONT_SIZE = 30  # 字体大小
-HANDLE_SIZE = 40  # 点击区域大小
+FONT_SIZE = 27  # 字体大小
+HANDLE_SIZE = 33  # 点击区域大小
 TIMEOUT = 30  # 超时时间（秒）
 
 # 1000个常用汉字列表
@@ -34,16 +34,6 @@ def generate_captcha_image(hanzi_list):
         draw.point([random.randint(0, IMG_WIDTH), random.randint(0, IMG_HEIGHT)],
                    fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
 
-    # 添加干扰线集中在图片中央
-    center_x = IMG_WIDTH // 2
-    center_y = IMG_HEIGHT // 2
-    for _ in range(10):
-        start_x = random.randint(center_x - 50, center_x + 50)
-        start_y = random.randint(center_y - 50, center_y + 50)
-        end_x = random.randint(center_x - 50, center_x + 50)
-        end_y = random.randint(center_y - 50, center_y + 50)
-        draw.line((start_x, start_y, end_x, end_y), fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
-
     # 随机打乱汉字的顺序
     shuffled_hanzi_list = hanzi_list.copy()
     random.shuffle(shuffled_hanzi_list)
@@ -58,7 +48,7 @@ def generate_captcha_image(hanzi_list):
         # 创建一个新的图像用于绘制单个汉字
         char_img = Image.new('RGB', (FONT_SIZE, FONT_SIZE), color=(255, 255, 255))
         char_draw = ImageDraw.Draw(char_img)
-        char_draw.text((0, 0), hanzi, fill=(0, 0, 0), font=ImageFont.truetype("simsun.ttc", FONT_SIZE))
+        char_draw.text((0, 0), hanzi, fill=(0, 0, 0), font=ImageFont.truetype("FZSTK.TTF", FONT_SIZE))
 
         # 扭曲汉字
         distortion = random.uniform(-0.1, 0.1)
@@ -67,6 +57,29 @@ def generate_captcha_image(hanzi_list):
 
         # 将扭曲后的汉字粘贴到主图像上
         img.paste(char_img, (x, y))
+
+    # 在汉字之上添加干扰线
+    # 增加干扰线长度和粗度
+    for _ in range(7):  # 增加干扰线数量
+        # 干扰线可以跨越整个图片
+        start_x = random.randint(0, IMG_WIDTH)
+        start_y = random.randint(0, IMG_HEIGHT)
+        end_x = random.randint(0, IMG_WIDTH)
+        end_y = random.randint(0, IMG_HEIGHT)
+        # 线宽增加到3-5像素
+        draw.line((start_x, start_y, end_x, end_y), 
+                 fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)),
+                 width=random.randint(2, 3))
+
+    # 添加干扰线集中在图片中央
+    center_x = IMG_WIDTH // 2
+    center_y = IMG_HEIGHT // 2
+    for _ in range(10):
+        start_x = random.randint(center_x - 50, center_x + 50)
+        start_y = random.randint(center_y - 50, center_y + 50)
+        end_x = random.randint(center_x - 50, center_x + 50)
+        end_y = random.randint(center_y - 50, center_y + 50)
+        draw.line((start_x, start_y, end_x, end_y), fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
 
     return img, shuffled_hanzi_list, positions
 
@@ -259,12 +272,39 @@ def index():
         </div>
         <p id="prompt"></p>
         <div id="message"></div>
+        <div class="timer" id="timer">验证码有效时间: 30秒</div>
     </div>
     <script>
     let clicks = [];
     let promptText = '';
     let mouseTrace = [];
     let startTime = 0;
+    let countdown = 30;
+    let timerInterval;
+
+    function startTimer() {
+        clearInterval(timerInterval);
+        countdown = 30;
+        updateTimerDisplay();
+        
+        timerInterval = setInterval(() => {
+            countdown--;
+            updateTimerDisplay();
+            
+            if (countdown <= 0) {
+                clearInterval(timerInterval);
+                document.getElementById('timer').textContent = '验证码已过期，正在自动刷新...';
+                document.getElementById('timer').className = 'timer expired';
+                refreshCaptcha();
+            }
+        }, 1000);
+    }
+
+    function updateTimerDisplay() {
+        const timerElement = document.getElementById('timer');
+        timerElement.textContent = `验证码有效时间: ${countdown}秒`;
+        timerElement.className = 'timer';
+    }
 
     function refreshCaptcha() {
         // 获取验证码图片和提示信息
@@ -284,11 +324,15 @@ def index():
                 const container = document.getElementById('captcha-container');
                 const overlays = container.querySelectorAll('.overlay');
                 overlays.forEach(overlay => overlay.remove());
+                
+                // 重置计时器
+                startTimer();
             });
     }
 
     // 初始化
     refreshCaptcha();
+    startTimer();
 
     function verifyCaptcha() {
         const operationTime = (Date.now() - startTime) / 1000;
