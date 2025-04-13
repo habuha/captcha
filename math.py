@@ -76,6 +76,13 @@ def generate_captcha():
         else:
             char_width = char_spacing
         
+        # 文字阴影（减小偏移量和透明度）
+        shadow_offset = 1  # 从2减小到1
+        draw.text((x + shadow_offset + random.randint(-2,2),  # 减小随机偏移范围
+                  y + shadow_offset + random.randint(-1,1)),
+                  char, fill=(180,180,180),  # 调亮阴影颜色
+                  font=font)
+        
         # 主文字
         draw.text((x + random.randint(-3,3), 
                   y + random.randint(-2,2)),
