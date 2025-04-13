@@ -1,5 +1,5 @@
 from flask import Flask, request, session, send_file, jsonify
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageTransform
 import random
 import string
 import io
@@ -12,7 +12,7 @@ app.secret_key = 'supersecretkey'  # 生产环境需要更安全的密钥
 # 验证码配置
 IMG_WIDTH = 400
 IMG_HEIGHT = 200
-NOISE_POINTS = 200  # 噪点数量
+NOISE_POINTS = 500  # 增加噪点数量
 FONT_SIZE = 30  # 字体大小
 HANDLE_SIZE = 40  # 点击区域大小
 TIMEOUT = 30  # 超时时间（秒）
@@ -34,17 +34,39 @@ def generate_captcha_image(hanzi_list):
         draw.point([random.randint(0, IMG_WIDTH), random.randint(0, IMG_HEIGHT)],
                    fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
 
+    # 添加干扰线集中在图片中央
+    center_x = IMG_WIDTH // 2
+    center_y = IMG_HEIGHT // 2
+    for _ in range(10):
+        start_x = random.randint(center_x - 50, center_x + 50)
+        start_y = random.randint(center_y - 50, center_y + 50)
+        end_x = random.randint(center_x - 50, center_x + 50)
+        end_y = random.randint(center_y - 50, center_y + 50)
+        draw.line((start_x, start_y, end_x, end_y), fill=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255)))
+
     # 随机打乱汉字的顺序
     shuffled_hanzi_list = hanzi_list.copy()
     random.shuffle(shuffled_hanzi_list)
 
-    # 绘制汉字
+    # 绘制汉字并扭曲
     positions = []
     for i, hanzi in enumerate(shuffled_hanzi_list):
         x = random.randint(50 + i * 80, 100 + i * 80)
         y = random.randint(50, IMG_HEIGHT - 50)
         positions.append((x, y))
-        draw.text((x, y), hanzi, fill=(0, 0, 0), font=ImageFont.truetype("simsun.ttc", FONT_SIZE))
+
+        # 创建一个新的图像用于绘制单个汉字
+        char_img = Image.new('RGB', (FONT_SIZE, FONT_SIZE), color=(255, 255, 255))
+        char_draw = ImageDraw.Draw(char_img)
+        char_draw.text((0, 0), hanzi, fill=(0, 0, 0), font=ImageFont.truetype("simsun.ttc", FONT_SIZE))
+
+        # 扭曲汉字
+        distortion = random.uniform(-0.1, 0.1)
+        matrix = (1, distortion, 0, distortion, 1, 0)
+        char_img = char_img.transform((FONT_SIZE, FONT_SIZE), Image.AFFINE, matrix, Image.BICUBIC)
+
+        # 将扭曲后的汉字粘贴到主图像上
+        img.paste(char_img, (x, y))
 
     return img, shuffled_hanzi_list, positions
 
@@ -76,6 +98,9 @@ def get_captcha():
 def verify():
     """验证用户点击顺序"""
     user_clicks = request.json.get('clicks', [])
+    mouse_trace = request.json.get('mouse_trace', [])
+    operation_time = request.json.get('operation_time', 0)
+
     captcha_info = session.get('captcha', {})
     hanzi_list = captcha_info.get('hanzi_list', [])
     start_time = captcha_info.get('start_time', 0)
@@ -84,6 +109,11 @@ def verify():
     if time.time() - start_time > TIMEOUT:
         session.pop('captcha', None)
         return jsonify({"status": "timeout", "message": "验证超时"})
+
+    # 简单的鼠标轨迹和操作速度验证
+    if len(mouse_trace) < 3 or operation_time < 1:
+        session.pop('captcha', None)
+        return jsonify({"status": "failure", "message": "验证失败，可能是机器操作"})
 
     # 检查点击顺序
     if user_clicks == hanzi_list:
@@ -233,6 +263,8 @@ def index():
     <script>
     let clicks = [];
     let promptText = '';
+    let mouseTrace = [];
+    let startTime = 0;
 
     function refreshCaptcha() {
         // 获取验证码图片和提示信息
@@ -242,6 +274,8 @@ def index():
                 const img = document.getElementById('captcha');
                 img.src = data.image;
                 clicks = [];
+                mouseTrace = [];
+                startTime = Date.now();
                 promptText = data.prompt;
                 document.getElementById('prompt').textContent = promptText;
                 document.getElementById('message').textContent = '';
@@ -257,12 +291,13 @@ def index():
     refreshCaptcha();
 
     function verifyCaptcha() {
+        const operationTime = (Date.now() - startTime) / 1000;
         fetch('/verify', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ clicks: clicks })
+            body: JSON.stringify({ clicks: clicks, mouse_trace: mouseTrace, operation_time: operationTime })
         })
         .then(response => response.json())
         .then(data => {
@@ -282,6 +317,13 @@ def index():
             }, 1500);
         });
     }
+
+    document.getElementById('captcha').addEventListener('mousemove', (e) => {
+        const rect = e.target.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        mouseTrace.push([x, y]);
+    });
 
     document.getElementById('captcha').addEventListener('click', (e) => {
         const rect = e.target.getBoundingClientRect();
